@@ -19,6 +19,8 @@ from app.schemas.auth import (
     RegisterRequest,
     RegisterResponse,
     RegisterUserResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
 )
 
 logger = structlog.get_logger()
@@ -246,3 +248,36 @@ def forgot_password(data: ForgotPasswordRequest, supabase: Client) -> ForgotPass
         )
 
     return ForgotPasswordResponse(message="Email de recuperação enviado")
+
+
+def reset_password(data: ResetPasswordRequest, supabase: Client) -> ResetPasswordResponse:
+    if len(data.new_password) < 6:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Senha deve ter no mínimo 6 caracteres",
+        )
+
+    # Exchange the recovery token for a session to identify the user
+    try:
+        auth_response = supabase.auth.verify_otp(
+            {"token_hash": data.token, "type": "recovery"}
+        )
+    except Exception as exc:
+        logger.warning("reset_password_verify_failed", error=str(exc))
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token inválido ou expirado")
+
+    if not auth_response.user:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token inválido ou expirado")
+
+    user_id = str(auth_response.user.id)
+
+    try:
+        supabase.auth.admin.update_user_by_id(user_id, {"password": data.new_password})
+        logger.info("reset_password_success", uuid=user_id)
+    except Exception as exc:
+        logger.error("reset_password_update_failed", uuid=user_id, error=str(exc))
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Erro ao alterar senha"
+        )
+
+    return ResetPasswordResponse(message="Senha alterada com sucesso")

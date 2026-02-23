@@ -14,6 +14,8 @@ from app.schemas.auth import (
     RefreshResponse,
     RegisterRequest,
     RegisterResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
 )
 from app.services import auth_service
 
@@ -52,6 +54,14 @@ def forgot_password(
     supabase: Client = Depends(get_supabase_client),
 ) -> ForgotPasswordResponse:
     return auth_service.forgot_password(data, supabase)
+
+
+@router.post("/reset-password", response_model=ResetPasswordResponse)
+def reset_password(
+    data: ResetPasswordRequest,
+    supabase: Client = Depends(get_supabase_client),
+) -> ResetPasswordResponse:
+    return auth_service.reset_password(data, supabase)
 
 
 @router.post("/logout", response_model=LogoutResponse)
