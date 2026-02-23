@@ -6,8 +6,15 @@ from fastapi import HTTPException, status
 from supabase import Client
 
 from app.core.config import settings
+from app.repositories.onboarding_repository import OnboardingRepository
 from app.repositories.user_repository import UserRepository
-from app.schemas.auth import RegisterRequest, RegisterResponse, RegisterUserResponse
+from app.schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    RegisterResponse,
+    RegisterUserResponse,
+)
 
 logger = structlog.get_logger()
 
@@ -125,4 +132,62 @@ def register(data: RegisterRequest, supabase: Client) -> RegisterResponse:
     return RegisterResponse(
         user=RegisterUserResponse(email=data.email),
         detail="Verificação de email pendente.",
+    )
+
+
+def login(data: LoginRequest, supabase: Client) -> LoginResponse:
+    # --- Autenticar via Supabase ---
+    try:
+        auth_response = supabase.auth.sign_in_with_password(
+            {"email": data.email, "password": data.password}
+        )
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "email not confirmed" in msg or "not confirmed" in msg:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Requer verificação do email",
+            )
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciais inválidas")
+
+    # Email ainda não confirmado (session None sem exceção em alguns casos)
+    if auth_response.session is None:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Requer verificação do email",
+        )
+
+    user_uuid = str(auth_response.user.id)
+    logger.info("login_auth_success", uuid=user_uuid, email=data.email)
+
+    # sign_in_with_password mutates the client session to the user's JWT.
+    # Reset PostgREST back to service_role so DB queries bypass RLS.
+    supabase.postgrest.auth(settings.SUPABASE_SERVICE_ROLE_KEY)
+
+    # --- Buscar perfil em public.users ---
+    user_repo = UserRepository(supabase)
+    user = user_repo.get_by_uuid(user_uuid)
+    logger.info("login_user_lookup", uuid=user_uuid, found=user is not None)
+
+    if not user:
+        logger.error("user_profile_not_found_on_login", uuid=user_uuid)
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Perfil não encontrado para uuid={user_uuid}",
+        )
+
+    # --- Verificar onboarding ---
+    onboarding_repo = OnboardingRepository(supabase)
+    onboarding_completed = onboarding_repo.is_completed(user_uuid)
+
+    session = auth_response.session
+    return LoginResponse(
+        id=user["id"],
+        uuid=str(user["uuid"]),
+        name=user.get("name"),
+        email=user.get("email"),
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        expires_in=session.expires_in or 3600,
+        onboarding_completed=onboarding_completed,
     )

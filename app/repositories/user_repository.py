@@ -46,6 +46,15 @@ class UserRepository(BaseRepository):
         )
         return response.data[0] if response.data else {}
 
+    def get_by_uuid(self, uuid: str) -> dict | None:
+        response = (
+            self.supabase.table(_TABLE)
+            .select("id, uuid, name, email")
+            .eq("uuid", uuid)
+            .execute()
+        )
+        return response.data[0] if response.data else None
+
     def update_customer_id(self, uuid: str, customer_id: str) -> None:
         (
             self.supabase.table(_TABLE)

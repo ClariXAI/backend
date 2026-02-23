@@ -19,3 +19,21 @@ class RegisterUserResponse(BaseModel):
 class RegisterResponse(BaseModel):
     user: RegisterUserResponse
     detail: str
+
+
+# ─── Login ────────────────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class LoginResponse(BaseModel):
+    id: int
+    uuid: str
+    name: str | None
+    email: str | None
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    onboarding_completed: bool

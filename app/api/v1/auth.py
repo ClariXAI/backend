@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from supabase import Client
 
 from app.core.dependencies import get_supabase_client
-from app.schemas.auth import RegisterRequest, RegisterResponse
+from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest, RegisterResponse
 from app.services import auth_service
 
 router = APIRouter()
@@ -14,3 +14,11 @@ def register(
     supabase: Client = Depends(get_supabase_client),
 ) -> RegisterResponse:
     return auth_service.register(data, supabase)
+
+
+@router.post("/login", response_model=LoginResponse)
+def login(
+    data: LoginRequest,
+    supabase: Client = Depends(get_supabase_client),
+) -> LoginResponse:
+    return auth_service.login(data, supabase)
