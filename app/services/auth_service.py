@@ -220,9 +220,7 @@ def refresh(data: RefreshRequest, supabase: Client) -> RefreshResponse:
 
 def logout(access_token: str, supabase: Client) -> LogoutResponse:
     try:
-        # Set the user's token so sign_out invalidates their specific session
-        supabase.auth.set_session(access_token, "")
-        supabase.auth.sign_out()
+        supabase.auth.admin.sign_out(access_token)
     except Exception as exc:
         logger.warning("logout_failed", error=str(exc))
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
