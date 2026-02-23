@@ -11,6 +11,7 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
+    LogoutResponse,
     RefreshRequest,
     RefreshResponse,
     RegisterRequest,
@@ -215,3 +216,15 @@ def refresh(data: RefreshRequest, supabase: Client) -> RefreshResponse:
         refresh_token=session.refresh_token,
         expires_in=session.expires_in or 3600,
     )
+
+
+def logout(access_token: str, supabase: Client) -> LogoutResponse:
+    try:
+        # Set the user's token so sign_out invalidates their specific session
+        supabase.auth.set_session(access_token, "")
+        supabase.auth.sign_out()
+    except Exception as exc:
+        logger.warning("logout_failed", error=str(exc))
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
+
+    return LogoutResponse(message="Logout realizado com sucesso")
