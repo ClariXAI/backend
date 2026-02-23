@@ -19,9 +19,8 @@ def create_app() -> FastAPI:
     register_middlewares(app)
     register_exception_handlers(app)
 
-    # Routers will be included here as they are implemented
-    # from app.api.v1 import auth, onboarding, ...
-    # app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
+    from app.api.v1 import auth
+    app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["auth"])
 
     @app.get("/health")
     async def health_check():

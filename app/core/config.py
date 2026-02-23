@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str
     SUPABASE_JWT_SECRET: str
 
+    # AbacatePay
+    ABACATEPAY_API_KEY: str = ""
+    ABACATEPAY_BASE_URL: str = "https://api.abacatepay.com"
+
     # Anthropic
     ANTHROPIC_API_KEY: str = ""
 
