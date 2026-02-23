@@ -9,6 +9,8 @@ from app.core.config import settings
 from app.repositories.onboarding_repository import OnboardingRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
     LoginResponse,
     LogoutResponse,
@@ -219,10 +221,28 @@ def refresh(data: RefreshRequest, supabase: Client) -> RefreshResponse:
 
 
 def logout(access_token: str, supabase: Client) -> LogoutResponse:
+    logger.info("logout_service_called", token_prefix=access_token[:20] if access_token else None)
     try:
-        supabase.auth.admin.sign_out(access_token)
+        result = supabase.auth.admin.sign_out(access_token)
+        logger.info("logout_admin_sign_out_success", result=str(result))
     except Exception as exc:
-        logger.warning("logout_failed", error=str(exc))
+        logger.warning("logout_admin_sign_out_failed", error=str(exc), error_type=type(exc).__name__)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
 
     return LogoutResponse(message="Logout realizado com sucesso")
+
+
+def forgot_password(data: ForgotPasswordRequest, supabase: Client) -> ForgotPasswordResponse:
+    user_repo = UserRepository(supabase)
+    if not user_repo.email_exists(data.email):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Email não encontrado")
+
+    try:
+        supabase.auth.reset_password_email(data.email)
+    except Exception as exc:
+        logger.error("forgot_password_failed", email=data.email, error=str(exc))
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Erro ao enviar email de recuperação"
+        )
+
+    return ForgotPasswordResponse(message="Email de recuperação enviado")
