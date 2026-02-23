@@ -1,13 +1,10 @@
 from dataclasses import dataclass
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, Header, HTTPException, status
 from supabase import Client, create_client
 
 from app.core.config import settings
 from app.core.security import verify_supabase_token
-
-bearer_scheme = HTTPBearer()
 
 
 @dataclass
@@ -21,9 +18,9 @@ def get_supabase_client() -> Client:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    access_token: str = Header(alias="access-token"),
 ) -> UserContext:
-    payload = await verify_supabase_token(credentials.credentials)
+    payload = await verify_supabase_token(access_token)
 
     user_id: str | None = payload.get("sub")
     email: str | None = payload.get("email")
