@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from supabase import Client
 
-from app.core.dependencies import UserContext, get_current_user, get_supabase_client
+from app.core.dependencies import get_supabase_client
+from app.core.security import verify_supabase_token
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
@@ -13,8 +13,6 @@ from app.schemas.auth import (
     RegisterResponse,
 )
 from app.services import auth_service
-
-_bearer = HTTPBearer()
 
 router = APIRouter()
 
@@ -44,9 +42,12 @@ def refresh(
 
 
 @router.post("/logout", response_model=LogoutResponse)
-def logout(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
-    _: UserContext = Depends(get_current_user),
+async def logout(
+    access_token: str = Header(alias="access-token"),
     supabase: Client = Depends(get_supabase_client),
 ) -> LogoutResponse:
-    return auth_service.logout(credentials.credentials, supabase)
+    try:
+        await verify_supabase_token(access_token)
+    except HTTPException:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
+    return auth_service.logout(access_token, supabase)
