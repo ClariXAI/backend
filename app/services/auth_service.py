@@ -11,6 +11,8 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
+    RefreshRequest,
+    RefreshResponse,
     RegisterRequest,
     RegisterResponse,
     RegisterUserResponse,
@@ -190,4 +192,26 @@ def login(data: LoginRequest, supabase: Client) -> LoginResponse:
         refresh_token=session.refresh_token,
         expires_in=session.expires_in or 3600,
         onboarding_completed=onboarding_completed,
+    )
+
+
+def refresh(data: RefreshRequest, supabase: Client) -> RefreshResponse:
+    try:
+        auth_response = supabase.auth.refresh_session(data.refresh_token)
+    except Exception as exc:
+        logger.warning("token_refresh_failed", error=str(exc))
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Refresh token inválido ou expirado"
+        )
+
+    if auth_response.session is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Refresh token inválido ou expirado"
+        )
+
+    session = auth_response.session
+    return RefreshResponse(
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        expires_in=session.expires_in or 3600,
     )

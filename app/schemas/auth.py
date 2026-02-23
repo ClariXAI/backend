@@ -37,3 +37,15 @@ class LoginResponse(BaseModel):
     refresh_token: str
     expires_in: int
     onboarding_completed: bool
+
+
+# ─── Refresh ──────────────────────────────────────────────────────────────────
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    expires_in: int

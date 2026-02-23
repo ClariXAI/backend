@@ -2,7 +2,14 @@ from fastapi import APIRouter, Depends
 from supabase import Client
 
 from app.core.dependencies import get_supabase_client
-from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest, RegisterResponse
+from app.schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    RefreshRequest,
+    RefreshResponse,
+    RegisterRequest,
+    RegisterResponse,
+)
 from app.services import auth_service
 
 router = APIRouter()
@@ -22,3 +29,11 @@ def login(
     supabase: Client = Depends(get_supabase_client),
 ) -> LoginResponse:
     return auth_service.login(data, supabase)
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+def refresh(
+    data: RefreshRequest,
+    supabase: Client = Depends(get_supabase_client),
+) -> RefreshResponse:
+    return auth_service.refresh(data, supabase)
