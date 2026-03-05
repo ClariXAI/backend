@@ -1,29 +1,28 @@
 from app.repositories.base import BaseRepository
 
-_TABLE = "loans"
+_TABLE = "consortia"
 
 
-class LoanRepository(BaseRepository):
+class ConsortiaRepository(BaseRepository):
     def create(
         self,
         user_uuid: str,
         name: str,
-        institution: str | None = None,
-        due_day: int | None = None,
+        administrator: str | None = None,
         total_number_of_installments: int | None = None,
         installment_amount: float | None = None,
-        fees: float | None = None,
+        due_day: int | None = None,
     ) -> dict:
         response = (
             self.supabase.table(_TABLE)
             .insert({
                 "user_uuid": user_uuid,
                 "name": name,
-                "institution": institution,
-                "due_day": due_day,
+                "administrator": administrator,
                 "total_number_of_installments": total_number_of_installments,
                 "installment_amount": int(installment_amount) if installment_amount is not None else None,
-                "fees": int(fees) if fees is not None else None,
+                "due_day": due_day,
+                "contemplated": False,
             })
             .execute()
         )

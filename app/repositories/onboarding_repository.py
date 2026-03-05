@@ -30,3 +30,33 @@ class OnboardingRepository(BaseRepository):
             .execute()
         )
         return response.data[0] if response.data else None
+
+    def save(self, user_uuid: str, data: dict) -> dict:
+        """Upsert onboarding data: update if row exists, insert otherwise."""
+        existing = (
+            self.supabase.table(_TABLE)
+            .select("id")
+            .eq("user_uuid", user_uuid)
+            .execute()
+        )
+
+        if existing.data:
+            response = (
+                self.supabase.table(_TABLE)
+                .update(data)
+                .eq("user_uuid", user_uuid)
+                .select(_SELECT_FIELDS)
+                .execute()
+            )
+        else:
+            response = (
+                self.supabase.table(_TABLE)
+                .insert({"user_uuid": user_uuid, **data})
+                .select(_SELECT_FIELDS)
+                .execute()
+            )
+
+        return response.data[0]
+
+    def mark_completed(self, user_uuid: str) -> None:
+        self.supabase.table(_TABLE).update({"completed": True}).eq("user_uuid", user_uuid).execute()
