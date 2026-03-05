@@ -55,9 +55,14 @@ _GOAL_PRESETS: dict[str, dict] = {
     },
 }
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# helpers
 
-def _calculate_suggested_limits(income: float, categories: list[str]) -> dict[str, float]:
+import math
+from datetime import date
+from typing import Any
+
+
+def _calculate_suggested_limits(income: float, categories: list) -> dict:
     from app.schemas.onboarding import CATEGORY_WEIGHTS
     return {
         cat: round(income * CATEGORY_WEIGHTS[cat], 2)
@@ -66,8 +71,7 @@ def _calculate_suggested_limits(income: float, categories: list[str]) -> dict[st
     }
 
 
-def _months_ahead(months: int):
-    from datetime import date
+def _months_ahead(months: int) -> date:
     today = date.today()
     month = today.month + months
     year = today.year + (month - 1) // 12
@@ -75,41 +79,12 @@ def _months_ahead(months: int):
     return date(year, month, 1)
 
 
-# helpers
-
-import math as _math
-from datetime import date as _date
-from typing import Any
-
-
-def _calculate_suggested_limits(income: float, categories: list[str]) -> dict[str, float]:
-    from app.schemas.onboarding import CATEGORY_WEIGHTS
-    return {
-        cat: round(income * CATEGORY_WEIGHTS[cat], 2)
-        for cat in categories
-        if cat in CATEGORY_WEIGHTS
-    }
-
-
-def _months_ahead(months: int) -> _date:
-    today = _date.today()
-    month = today.month + months
-    year = today.year + (month - 1) // 12
-    month = ((month - 1) % 12) + 1
-    return _date(year, month, 1)
-
-
-def _calc_emergency_fund(
-    has_emergency_fund: bool,
-    emergency_fund_amount: float | None,
-    income: float,
-    monthly_cost: float,
-) -> dict[str, Any]:
+def _calc_emergency_fund(has_emergency_fund, emergency_fund_amount, income, monthly_cost) -> dict:
     if not has_emergency_fund:
         target = round(6 * monthly_cost, 2)
         surplus = max(income - monthly_cost, 0)
         contribution = round(max(surplus * 0.3, 200), 2)
-        months = _math.ceil(target / contribution) if contribution > 0 else 24
+        months = math.ceil(target / contribution) if contribution > 0 else 24
         return {
             "title": "Reserva de Emergencia",
             "target_amount": target,
@@ -147,8 +122,7 @@ def _ai_suggestion(prompt: str) -> str:
         return ""
 
 
-# get_onboarding
-def get_onboarding(user_uuid: str, supabase) -> "OnboardingResponse":
+def get_onboarding(user_uuid: str, supabase):
     from app.repositories.onboarding_repository import OnboardingRepository
     from app.schemas.onboarding import OnboardingResponse, NextGoalSchema, CommitmentSchema
     from fastapi import HTTPException, status
@@ -172,7 +146,6 @@ def get_onboarding(user_uuid: str, supabase) -> "OnboardingResponse":
     )
 
 
-# save_onboarding
 def save_onboarding(user_uuid: str, data, supabase):
     from app.repositories.onboarding_repository import OnboardingRepository
     from app.schemas.onboarding import (
@@ -238,12 +211,10 @@ def save_onboarding(user_uuid: str, data, supabase):
     )
 
 
-# get_suggested_limits
 def get_suggested_limits(income: float, categories: list) -> dict:
     return _calculate_suggested_limits(income, categories)
 
 
-# calc_emergency_fund
 def calc_emergency_fund(data):
     from app.schemas.onboarding import EmergencyFundResponse
     ef = _calc_emergency_fund(
@@ -276,83 +247,77 @@ def calc_emergency_fund(data):
     )
 
 
-# create_next_goal
 def create_next_goal(user_uuid: str, data, supabase):
-    from app.repositories.onboarding_repository import OnboardingRepository
-    from app.repositories.goal_repository import GoalRepository, PRIORITY_ALTA
-    from app.schemas.onboarding import NextGoalCreatedResponse
-    from fastapi import HTTPException, status
+    from app.repositories.goal_repository import GoalRepository, PRIORITY_ALTA, PRIORITY_BAIXA
+    from app.schemas.onboarding import NextGoalCreatedResponse, NextGoalSchema, GoalSummarySchema
 
-    repo = OnboardingRepository(supabase)
-    onboarding = repo.get_by_user_uuid(user_uuid)
-    if not onboarding or not (onboarding.get("has_emergency_fund") or onboarding.get("emergency_fund_amount")):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Reserva de emergencia nao esta completa. Etapa de proximo objetivo nao disponivel.",
-        )
+    preset = _GOAL_PRESETS.get(data.goal_key) if data.goal_key else None
+    title = preset["title"] if preset else (data.title or "Meta")
+    description = preset["description"] if preset else data.description
+    target_amount = float(preset["target_amount"]) if preset else float(data.target_amount or 0)
 
-    if data.goal_id == "outro":
-        if not data.custom_title or not data.custom_amount:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Titulo e valor sao obrigatorios para meta personalizada",
-            )
-        title = data.custom_title
-        description = data.custom_description
-        target_amount = data.custom_amount
-    else:
-        preset = _GOAL_PRESETS.get(data.goal_id)
-        if not preset:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "goal_id nao reconhecido: " + data.goal_id,
-            )
-        title = preset["title"]
-        description = preset["description"]
-        target_amount = preset["target_amount"]
-
-    import math
-    surplus = max(data.income - data.monthly_cost, 0)
-    contribution = round(max(surplus * 0.5, 200), 2)
-    months = math.ceil(target_amount / contribution) if contribution > 0 else 36
+    income = data.income or 0.0
+    monthly_cost = data.monthly_cost or 0.0
+    surplus = max(income - monthly_cost, 0)
+    contribution = round(surplus * 0.1, 2) if surplus > 0 else 100.0
+    months = math.ceil(target_amount / contribution) if contribution > 0 else 12
     target_date = _months_ahead(months)
 
     prompt = (
         "Voce e um consultor financeiro brasileiro. Responda em portugues, motivacional "
-        "e conciso (1 frase). O usuario quer atingir o objetivo " + title + " e levara "
-        + str(months) + " meses. Escreva apenas a frase de incentivo."
+        "e conciso (1 frase). O usuario definiu uma meta financeira: " + title + ". "
+        "Com contribuicoes mensais chegara la em cerca de " + str(months) + " meses. "
+        "Escreva apenas a frase de incentivo."
     )
     suggestion = _ai_suggestion(prompt)
 
     goal_repo = GoalRepository(supabase)
-    row = goal_repo.create(
+    priority_id = PRIORITY_ALTA if months <= 6 else PRIORITY_BAIXA
+    saved_goal = goal_repo.create(
         user_uuid=user_uuid,
         name=title,
         description=description,
         target_value=target_amount,
-        priority_id=PRIORITY_ALTA,
+        priority_id=priority_id,
         target_date=str(target_date),
         monthly_contribution=contribution,
     )
+
+    from app.repositories.onboarding_repository import OnboardingRepository
+    onboarding_repo = OnboardingRepository(supabase)
+    onboarding_repo.save(user_uuid, {
+        "next_goal": {
+            "goal_key": data.goal_key,
+            "title": title,
+            "description": description,
+            "target_amount": target_amount,
+            "monthly_contribution": contribution,
+        }
+    })
+
+    goal_summary = GoalSummarySchema(
+        id=saved_goal["id"],
+        name=saved_goal["name"],
+        target_value=saved_goal["target_value"],
+        current_value=saved_goal["current_value"],
+        monthly_contribution=saved_goal.get("monthly_contribution"),
+        target_date=saved_goal.get("target_date"),
+        priority_id=saved_goal["priority_id"],
+    )
     return NextGoalCreatedResponse(
-        id=row["id"],
-        title=row["name"],
-        description=row.get("description"),
-        target_amount=row["target_value"],
-        current_amount=row.get("current_value") or 0,
-        priority="alta",
-        target_date=row.get("target_date"),
-        monthly_contribution=row.get("monthly_contribution"),
+        goal=goal_summary,
+        monthly_contribution=contribution,
+        months_to_goal=months,
+        target_date=target_date,
         ai_suggestion=suggestion or None,
     )
 
 
-# complete_onboarding
 def complete_onboarding(user_uuid: str, supabase):
     from app.repositories.onboarding_repository import OnboardingRepository
+    from app.repositories.goal_repository import GoalRepository, PRIORITY_ALTA, PRIORITY_BAIXA
     from app.repositories.category_repository import CategoryRepository
     from app.repositories.limit_repository import LimitRepository
-    from app.repositories.goal_repository import GoalRepository, PRIORITY_ALTA, PRIORITY_BAIXA
     from app.repositories.signature_repository import SignatureRepository
     from app.repositories.credit_card_repository import CreditCardRepository
     from app.repositories.loan_repository import LoanRepository
@@ -364,42 +329,21 @@ def complete_onboarding(user_uuid: str, supabase):
 
     repo = OnboardingRepository(supabase)
     row = repo.get_by_user_uuid(user_uuid)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Onboarding nao iniciado")
 
-    if not row or not row.get("income") or not row.get("monthly_cost") or not row.get("selected_categories"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dados de onboarding incompletos")
+    goals_created: list[GoalSummarySchema] = []
+    commitment_created: CommitmentSummarySchema | None = None
 
-    income = float(row["income"])
-    monthly_cost = float(row["monthly_cost"])
-    categories = row["selected_categories"]
-    suggested_limits = row.get("suggested_limits") or _calculate_suggested_limits(income, categories)
-
-    cat_repo = CategoryRepository(supabase)
-    limit_repo = LimitRepository(supabase)
-    categories_created = 0
-    limits_created = 0
-
-    for cat_name in categories:
-        try:
-            cat_row = cat_repo.create(user_uuid=user_uuid, name=cat_name)
-            categories_created += 1
-            limit_repo.create(
-                user_uuid=user_uuid,
-                category_id=cat_row["id"],
-                value=suggested_limits.get(cat_name, 0),
-            )
-            limits_created += 1
-        except Exception as exc:
-            logger.warning("onboarding_category_limit_failed", category=cat_name, error=str(exc))
-
-    goal_repo = GoalRepository(supabase)
-    goals_created = []
-    has_ef = row.get("has_emergency_fund")
-    ef_amount = row.get("emergency_fund_amount")
-    ef_data = _calc_emergency_fund(bool(has_ef), ef_amount, income, monthly_cost)
-    priority_id = PRIORITY_BAIXA if has_ef else PRIORITY_ALTA
-
-    try:
-        ef_row = goal_repo.create(
+    # Emergency fund goal
+    ef_has = row.get("has_emergency_fund")
+    ef_income = row.get("income") or 0
+    ef_cost = row.get("monthly_cost") or 0
+    if ef_has is not None and ef_income and ef_cost:
+        ef_data = _calc_emergency_fund(ef_has, row.get("emergency_fund_amount"), ef_income, ef_cost)
+        priority_id = PRIORITY_ALTA if ef_data["priority"] == "alta" else PRIORITY_BAIXA
+        goal_repo = GoalRepository(supabase)
+        saved = goal_repo.create(
             user_uuid=user_uuid,
             name=ef_data["title"],
             description=None,
@@ -410,72 +354,73 @@ def complete_onboarding(user_uuid: str, supabase):
             current_value=ef_data["current_amount"],
         )
         goals_created.append(GoalSummarySchema(
-            title=ef_row["name"],
-            target_amount=ef_row["target_value"],
-            current_amount=ef_row.get("current_value") or 0,
-            priority=ef_data["priority"],
+            id=saved["id"],
+            name=saved["name"],
+            target_value=saved["target_value"],
+            current_value=saved["current_value"],
+            monthly_contribution=saved.get("monthly_contribution"),
+            target_date=saved.get("target_date"),
+            priority_id=saved["priority_id"],
         ))
-    except Exception as exc:
-        logger.error("onboarding_emergency_fund_goal_failed", error=str(exc))
 
-    commitment_created = None
-    commitment_data = row.get("commitment")
-    if commitment_data:
-        c_type = commitment_data.get("type")
-        c_data = commitment_data.get("data") or {}
-        try:
-            if c_type == "assinatura":
-                SignatureRepository(supabase).create(
-                    user_uuid=user_uuid,
-                    name=c_data.get("title") or c_data.get("name", ""),
-                    value=c_data.get("value"),
-                    plan=c_data.get("plan"),
-                    date_of_signature=c_data.get("due_date"),
-                )
-                commitment_created = CommitmentSummarySchema(
-                    type=c_type, title=c_data.get("title") or c_data.get("name", "")
-                )
-            elif c_type == "cartao":
-                CreditCardRepository(supabase).create(
-                    user_uuid=user_uuid,
-                    name=c_data.get("name", ""),
-                    bank=c_data.get("bank"),
-                    total_limit=c_data.get("total_limit"),
-                    closing_day=c_data.get("closing_day"),
-                    due_day=c_data.get("due_day"),
-                )
-                commitment_created = CommitmentSummarySchema(type=c_type, title=c_data.get("name", ""))
-            elif c_type == "emprestimo":
-                LoanRepository(supabase).create(
-                    user_uuid=user_uuid,
-                    name=c_data.get("name", ""),
-                    institution=c_data.get("institution"),
-                    due_day=c_data.get("due_day"),
-                    total_number_of_installments=c_data.get("total_number_of_installments"),
-                    installment_amount=c_data.get("installment_amount"),
-                    fees=c_data.get("fees"),
-                )
-                commitment_created = CommitmentSummarySchema(type=c_type, title=c_data.get("name", ""))
-            elif c_type == "consorcio":
-                ConsortiaRepository(supabase).create(
-                    user_uuid=user_uuid,
-                    name=c_data.get("name", ""),
-                    administrator=c_data.get("administrator"),
-                    total_number_of_installments=c_data.get("total_number_of_installments"),
-                    installment_amount=c_data.get("installment_amount"),
-                    due_day=c_data.get("due_day"),
-                )
-                commitment_created = CommitmentSummarySchema(type=c_type, title=c_data.get("name", ""))
-        except Exception as exc:
-            logger.error("onboarding_commitment_failed", type=c_type, error=str(exc))
+    # Categories and limits
+    cats = row.get("selected_categories") or []
+    limits = row.get("suggested_limits") or {}
+    if cats:
+        cat_repo = CategoryRepository(supabase)
+        limit_repo = LimitRepository(supabase)
+        for cat_name in cats:
+            saved_cat = cat_repo.create(user_uuid=user_uuid, name=cat_name)
+            limit_val = limits.get(cat_name)
+            if limit_val:
+                limit_repo.create(user_uuid=user_uuid, category_id=saved_cat["id"], value=limit_val)
+
+    # Commitment
+    cm = row.get("commitment")
+    if cm:
+        ctype = cm.get("type")
+        name = cm.get("name", "")
+        value = float(cm.get("value") or 0)
+
+        if ctype == "assinatura":
+            sig_repo = SignatureRepository(supabase)
+            saved_cm = sig_repo.create(
+                user_uuid=user_uuid,
+                name=name,
+                value=value,
+                plan=cm.get("plan"),
+                date_of_signature=cm.get("due_date"),
+            )
+            commitment_created = CommitmentSummarySchema(id=saved_cm["id"], type=ctype, name=name, value=value)
+        elif ctype == "cartao":
+            cc_repo = CreditCardRepository(supabase)
+            saved_cm = cc_repo.create(
+                user_uuid=user_uuid,
+                name=name,
+                total_limit=value,
+            )
+            commitment_created = CommitmentSummarySchema(id=saved_cm["id"], type=ctype, name=name, value=value)
+        elif ctype == "emprestimo":
+            loan_repo = LoanRepository(supabase)
+            saved_cm = loan_repo.create(
+                user_uuid=user_uuid,
+                name=name,
+                installment_amount=value,
+            )
+            commitment_created = CommitmentSummarySchema(id=saved_cm["id"], type=ctype, name=name, value=value)
+        elif ctype == "consorcio":
+            con_repo = ConsortiaRepository(supabase)
+            saved_cm = con_repo.create(
+                user_uuid=user_uuid,
+                name=name,
+                installment_amount=value,
+            )
+            commitment_created = CommitmentSummarySchema(id=saved_cm["id"], type=ctype, name=name, value=value)
 
     repo.mark_completed(user_uuid)
 
     return CompleteOnboardingResponse(
-        completed=True,
-        categories_created=categories_created,
-        limits_created=limits_created,
         goals_created=goals_created,
         commitment_created=commitment_created,
-        message="Onboarding finalizado com sucesso",
+        completed=True,
     )
