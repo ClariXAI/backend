@@ -4,28 +4,26 @@ from datetime import date
 
 from app.repositories.base import BaseRepository
 
-_TABLE = "loans"
+_TABLE = "subscriptions"
 
 
-class LoanRepository(BaseRepository):
+class SubscriptionRepository(BaseRepository):
 
     def create(
         self,
         user_uuid: str,
-        creditor: str,
-        total_amount: float,
-        installments: int,
-        monthly_payment: float,
-        start_date: date,
+        title: str,
+        value: float,
+        plan: str,
+        due_date: date,
         category_id: int | None = None,
     ) -> dict:
         row: dict = {
             "user_uuid": user_uuid,
-            "creditor": creditor,
-            "total_amount": total_amount,
-            "installments": installments,
-            "monthly_payment": monthly_payment,
-            "start_date": start_date.isoformat(),
+            "title": title,
+            "value": value,
+            "plan": plan,
+            "due_date": due_date.isoformat(),
         }
         if category_id is not None:
             row["category_id"] = category_id

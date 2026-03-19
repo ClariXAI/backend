@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     ABACATEPAY_API_KEY: str = ""
     ABACATEPAY_BASE_URL: str = "https://api.abacatepay.com"
 
+    # Trial
+    TRIAL_DAYS: int = 14
+
     # Anthropic
     ANTHROPIC_API_KEY: str = ""
 

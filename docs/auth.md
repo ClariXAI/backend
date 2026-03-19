@@ -1,259 +1,302 @@
-# Auth — Documentação Técnica
+# Auth
 
-## Visão Geral
+Toda autenticação é delegada ao **Supabase Auth** (JWT HS256). O FastAPI valida o token localmente, extrai `user_id` (`sub`) e injeta como `UserContext` nas rotas protegidas. Nenhuma chamada extra ao Supabase é feita na validação.
 
-O ClariX não gerencia sessões nem armazena senhas. Toda autenticação é delegada ao **Supabase Auth**, que emite JWTs (RS256/HS256). O FastAPI apenas **valida** esses tokens, extrai o `user_id` (`sub`) e injeta como contexto em todos os endpoints protegidos.
+Base: `/api/v1/auth`
+
+---
+
+## Fluxo geral
 
 ```
-Cliente               FastAPI                  Supabase Auth         PostgreSQL
-  │                      │                           │                   │
-  │ POST /auth/register  │                           │                   │
-  │─────────────────────▶│  supabase.auth.sign_up()  │                   │
-  │                      │──────────────────────────▶│                   │
-  │                      │◀──────────────────────────│ session + user    │
-  │                      │  INSERT INTO public.users │                   │
-  │                      │──────────────────────────────────────────────▶│
-  │◀─────────────────────│  { access_token, refresh_token, user }        │
-  │                      │                           │                   │
-  │ POST /auth/login     │                           │                   │
-  │─────────────────────▶│  supabase.auth.sign_in()  │                   │
-  │                      │──────────────────────────▶│                   │
-  │◀─────────────────────│◀──────────────────────────│ session           │
-  │                      │                           │                   │
-  │ GET /profile         │                           │                   │
-  │  Authorization: Bearer <access_token>            │                   │
-  │─────────────────────▶│                           │                   │
-  │                      │ verify_supabase_token()   │                   │
-  │                      │ → UserContext(user_id)     │                   │
-  │◀─────────────────────│                           │                   │
+Register → confirmar email → Login → Onboarding (se não concluído) → App
+```
+
+- O registro **não** retorna tokens — o usuário precisa confirmar o email antes de logar.
+- O login verifica onboarding e trial, retornando tudo que o frontend precisa para decidir o próximo passo.
+
+---
+
+## Endpoints
+
+### `POST /register`
+
+Cria conta no Supabase Auth + perfil em `public.users` + registro de onboarding.
+
+**Request**
+```json
+{
+  "name": "Rafael Lima",
+  "email": "rafael@email.com",
+  "password": "minhasenha123",
+  "cpf": "075.129.315-65",
+  "whatsapp": "+5575982985771"
+}
+```
+
+- `cpf` — opcional; armazenado como dígitos limpos (`07512931565`)
+- `whatsapp` — opcional; normalizado para sempre incluir código do país (`5575982985771`)
+- Números com 10 ou 11 dígitos recebem `55` automaticamente
+
+**Response 201**
+```json
+{
+  "user": {
+    "id": "uuid-user-id",
+    "name": "Rafael Lima",
+    "email": "rafael@email.com"
+  },
+  "detail": "Verifique seu email para confirmar o cadastro."
+}
+```
+
+**Erros**
+| Status | Detalhe |
+|---|---|
+| 409 | Email já cadastrado |
+| 409 | WhatsApp já cadastrado |
+| 422 | CPF inválido |
+| 422 | WhatsApp inválido |
+| 500 | Erro ao criar conta |
+
+**Comportamento interno**
+1. Verifica duplicidade de email e WhatsApp em `public.users`
+2. Cria usuário em `auth.users` via `supabase.auth.sign_up()`
+3. Cria perfil em `public.users` com `plan_status = "trial"` e datas do trial calculadas
+4. Cria registro em `public.onboarding` (`current_step = 1`, `completed = false`)
+5. Cria cliente na AbacatePay (falha silenciosa — não bloqueia o registro)
+6. **Rollback:** se o INSERT em `public.users` falhar, o usuário criado em `auth.users` é deletado
+
+---
+
+### `POST /login`
+
+Autentica o usuário e retorna tokens + estado da conta.
+
+**Request**
+```json
+{
+  "email": "rafael@email.com",
+  "password": "minhasenha123"
+}
+```
+
+**Response 200**
+```json
+{
+  "user": {
+    "id": "uuid-user-id",
+    "name": "Rafael Lima",
+    "email": "rafael@email.com"
+  },
+  "onboarding_completed": false,
+  "plan_status": "trial",
+  "trial": {
+    "starts_at": "2026-03-09T19:25:32Z",
+    "ends_at": "2026-03-23T19:25:32Z",
+    "days_remaining": 5
+  },
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "token_type": "bearer"
+}
+```
+
+- `trial` é `null` quando `plan_status = "active"`
+- `plan_status`: `"trial"` | `"expired"` | `"active"`
+- Se `plan_status == "trial"` e `trial_ends_at < now`, atualiza automaticamente para `"expired"` no banco antes de retornar
+
+**Lógica do frontend após login**
+```
+onboarding_completed == false  → redirecionar para /onboarding
+plan_status == "expired"       → redirecionar para /planos
+plan_status == "trial"         → acesso liberado (exibir banner de trial)
+plan_status == "active"        → acesso liberado
+```
+
+**Erros**
+| Status | Detalhe |
+|---|---|
+| 401 | Email ou senha inválidos |
+| 403 | Email ainda não confirmado. Verifique sua caixa de entrada. |
+| 500 | Erro ao realizar login |
+
+---
+
+### `POST /refresh`
+
+Renova o `access_token` usando o `refresh_token`.
+
+**Request**
+```json
+{
+  "refresh_token": "eyJ..."
+}
+```
+
+**Response 200**
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "token_type": "bearer"
+}
+```
+
+O `access_token` expira em **1 hora** (padrão Supabase). O frontend deve chamar este endpoint antes da expiração ou ao receber `401`.
+
+**Erros**
+| Status | Detalhe |
+|---|---|
+| 401 | Refresh token inválido ou expirado |
+
+---
+
+### `POST /logout`
+
+Invalida a sessão no Supabase. Requer token no header.
+
+**Header**
+```
+Authorization: Bearer <access_token>
+```
+
+**Response 200**
+```json
+{
+  "detail": "Sessão encerrada com sucesso."
+}
+```
+
+**Erros**
+| Status | Detalhe |
+|---|---|
+| 401 | Token inválido ou ausente |
+| 500 | Erro ao encerrar sessão |
+
+---
+
+### `POST /forgot-password`
+
+Dispara email de redefinição de senha. Sempre retorna `200` independente de o email existir (evita enumeração de usuários).
+
+**Request**
+```json
+{
+  "email": "rafael@email.com"
+}
+```
+
+**Response 200**
+```json
+{
+  "detail": "Se este email estiver cadastrado, você receberá um link de redefinição."
+}
 ```
 
 ---
 
-## Endpoints Planejados
+### `POST /reset-password`
 
-| Método | Path | Proteção | Descrição |
-|--------|------|----------|-----------|
-| `POST` | `/api/v1/auth/register` | Público | Cria conta no Supabase Auth + registro em `public.users` |
-| `POST` | `/api/v1/auth/login` | Público | Autentica e retorna `access_token` + `refresh_token` |
-| `POST` | `/api/v1/auth/refresh` | Público | Troca `refresh_token` por novo par de tokens |
-| `POST` | `/api/v1/auth/logout` | JWT | Invalida a sessão no Supabase |
-| `GET`  | `/api/v1/auth/me` | JWT | Retorna dados do usuário autenticado |
+Redefine a senha usando o token OTP do link enviado por email.
 
----
-
-## Fluxo de Register
-
-```
-POST /api/v1/auth/register
-Body: { name, email, password, cpf?, whatsapp? }
-
-1. Valida schema (Pydantic)
-2. supabase.auth.sign_up({ email, password })
-   → Supabase cria registro em auth.users
-   → Envia e-mail de confirmação (configurável)
-3. INSERT INTO public.users
-   (id=auth_user.id, name, email, cpf, whatsapp, plan='free',
-    onboarding_completed=false)
-4. Retorna { access_token, refresh_token, token_type, user }
+**Request**
+```json
+{
+  "token": "otp_token_do_link",
+  "new_password": "novaSenha123"
+}
 ```
 
-**Transação atômica:** O `id` de `public.users` é o mesmo UUID gerado pelo Supabase Auth (`auth.users.id`). Se o INSERT falhar após o sign_up, o handler de exceção chama `supabase.auth.admin.delete_user(uid)` para fazer rollback manual.
+- `token` — extraído da URL do link (`?token=xxx` ou `#access_token=xxx`)
+- `new_password` — mínimo 8 caracteres
 
----
-
-## Fluxo de Login
-
-```
-POST /api/v1/auth/login
-Body: { email, password }
-
-1. supabase.auth.sign_in_with_password({ email, password })
-2. Supabase valida e retorna session
-3. Retorna { access_token, refresh_token, token_type, expires_in }
+**Response 200**
+```json
+{
+  "detail": "Senha redefinida com sucesso."
+}
 ```
 
-Nenhuma query ao banco é necessária — Supabase faz tudo.
+**Erros**
+| Status | Detalhe |
+|---|---|
+| 400 | Link de redefinição inválido ou expirado. |
+| 500 | Erro ao redefinir a senha. |
 
----
-
-## Fluxo de Refresh
-
+**Fluxo completo de recuperação**
 ```
-POST /api/v1/auth/refresh
-Body: { refresh_token }
-
-1. supabase.auth.refresh_session(refresh_token)
-2. Retorna novo par { access_token, refresh_token }
-```
-
-O `access_token` do Supabase expira em **1 hora** por padrão. O frontend deve chamar este endpoint antes da expiração.
-
----
-
-## Fluxo de Logout
-
-```
-POST /api/v1/auth/logout
-Header: Authorization: Bearer <access_token>
-
-1. get_current_user() → valida JWT → UserContext
-2. supabase.auth.sign_out()
-   → Invalida a sessão no lado do Supabase (blacklist interna)
-3. Retorna 204 No Content
+1. Usuário clica "Esqueci minha senha"
+2. Frontend → POST /auth/forgot-password { email }
+3. Supabase envia email com link contendo token
+4. Usuário clica no link → Frontend captura token da URL
+5. Frontend → POST /auth/reset-password { token, new_password }
+6. Supabase invalida o token após uso
 ```
 
 ---
 
-## Fluxo de /me
+## Validação JWT
 
-```
-GET /api/v1/auth/me
-Header: Authorization: Bearer <access_token>
-
-1. get_current_user() → valida JWT → UserContext(user_id, email)
-2. SELECT * FROM public.users WHERE id = user_id
-3. Retorna { id, name, email, cpf, whatsapp, plan,
-             onboarding_completed, created_at }
-```
-
----
-
-## Validação JWT (core/security.py)
+Todos os endpoints protegidos exigem `Authorization: Bearer <access_token>`.
 
 ```python
-# O Supabase assina os JWTs com o SUPABASE_JWT_SECRET (HS256)
+# core/security.py
 payload = jwt.decode(
     token,
-    SUPABASE_JWT_SECRET,
+    settings.SUPABASE_JWT_SECRET,
     algorithms=["HS256"],
-    audience="authenticated",   # claim obrigatória no token Supabase
+    audience="authenticated",
 )
-# payload contém:
-# {
-#   "sub": "uuid-do-usuario",        ← user_id
-#   "email": "user@email.com",
-#   "role": "authenticated",
-#   "aud": "authenticated",
-#   "exp": 1234567890,
-#   "iat": 1234567890,
-# }
+# Campos extraídos:
+# payload["sub"]   → user_id (UUID)
+# payload["email"] → email do usuário
 ```
 
-A validação verifica automaticamente: **expiração**, **audiência** e **assinatura**. Nenhuma chamada extra ao Supabase é necessária — o JWT é self-contained.
+A validação verifica automaticamente: **expiração**, **audiência** e **assinatura**. Nenhuma chamada ao Supabase é feita — o JWT é self-contained.
 
 ---
 
-## Injeção de Dependência
+## Trial
 
-Todos os endpoints protegidos recebem `current_user: UserContext` via:
-
-```python
-@router.get("/me")
-async def get_me(
-    current_user: UserContext = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase_client),
-):
-    ...
-```
-
-`get_current_user` extrai o Bearer token do header, valida com `verify_supabase_token()` e retorna `UserContext(user_id, email)`.
+- Duração configurável via `TRIAL_DAYS` (padrão: `14` dias)
+- Calculado no registro: `trial_ends_at = now + TRIAL_DAYS`
+- Verificação ocorre **no login**: se `plan_status == "trial"` e `trial_ends_at < now` → atualiza para `"expired"`
+- Acesso total durante o trial; bloqueio apenas após expiração sem plano ativo
 
 ---
 
-## Tabela `public.users`
+## Tabelas relacionadas
 
-```sql
-CREATE TABLE public.users (
-    id                   UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    name                 TEXT NOT NULL,
-    email                TEXT NOT NULL UNIQUE,
-    cpf                  TEXT,
-    whatsapp             TEXT,
-    plan                 TEXT NOT NULL DEFAULT 'free',       -- free | pro | premium
-    billing_period       TEXT DEFAULT 'monthly',             -- monthly | yearly
-    onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### `public.users`
 
--- RLS
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "users_select_own" ON public.users
-    FOR SELECT USING (auth.uid() = id);
-
-CREATE POLICY "users_update_own" ON public.users
-    FOR UPDATE USING (auth.uid() = id);
-
--- Index
-CREATE INDEX users_email_idx ON public.users(email);
-```
-
-**Nota:** O `INSERT` inicial é feito com a `service_role_key` (que bypassa RLS), porque no momento do register o usuário ainda não tem sessão ativa no banco.
+| Coluna | Tipo | Descrição |
+|---|---|---|
+| `id` | BIGINT | PK auto-gerado |
+| `user_uuid` | UUID | FK para `auth.users` |
+| `name` | TEXT | Nome completo |
+| `email` | TEXT | Email (único) |
+| `phone` | TEXT | WhatsApp com código do país (`5575982985771`) |
+| `tax_id` | TEXT | CPF (apenas dígitos) |
+| `active_bot` | BOOLEAN | Bot WhatsApp ativo |
+| `plan_id` | INT | FK para `plans` (null durante trial) |
+| `plan_status` | TEXT | `trial` \| `expired` \| `active` |
+| `customer_id` | TEXT | ID do cliente na AbacatePay |
+| `trial_starts_at` | TIMESTAMPTZ | Início do trial |
+| `trial_ends_at` | TIMESTAMPTZ | Fim do trial |
+| `created_at` | TIMESTAMPTZ | |
+| `updated_at` | TIMESTAMPTZ | |
 
 ---
 
-## Schemas Pydantic (schemas/auth.py)
+## Variáveis de ambiente
 
-```python
-# Request
-class RegisterRequest(BaseModel):
-    name: str
-    email: EmailStr
-    password: str          # min 8 chars — validado no Supabase
-    cpf: str | None = None
-    whatsapp: str | None = None
+| Variável | Descrição |
+|---|---|
+| `SUPABASE_URL` | Project URL |
+| `SUPABASE_ANON_KEY` | Chave pública (sign_up, sign_in) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Chave de serviço — bypassa RLS (INSERT em public.users) |
+| `SUPABASE_JWT_SECRET` | Segredo para validação local do JWT |
+| `TRIAL_DAYS` | Duração do trial em dias (default: `14`) |
 
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-# Response
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-
-class UserResponse(BaseModel):
-    id: str
-    name: str
-    email: str
-    cpf: str | None
-    whatsapp: str | None
-    plan: str
-    onboarding_completed: bool
-    created_at: datetime
-
-class RegisterResponse(BaseModel):
-    tokens: TokenResponse
-    user: UserResponse
-```
-
----
-
-## Tratamento de Erros
-
-| Situação | HTTP | Mensagem |
-|----------|------|----------|
-| E-mail já cadastrado | 409 Conflict | "E-mail já está em uso" |
-| Credenciais inválidas | 401 Unauthorized | "E-mail ou senha incorretos" |
-| Token expirado | 401 Unauthorized | "Token expirado" |
-| Token inválido | 401 Unauthorized | "Token inválido" |
-| Usuário não encontrado | 404 Not Found | "Usuário não encontrado" |
-
----
-
-## Variáveis de Ambiente Necessárias
-
-| Variável | Onde encontrar | Uso |
-|----------|---------------|-----|
-| `SUPABASE_URL` | Dashboard → Project Settings → API → Project URL | Base URL do client |
-| `SUPABASE_ANON_KEY` | Dashboard → Project Settings → API → anon public | Operações públicas (sign_up, sign_in) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Dashboard → Project Settings → API → service_role | INSERT em public.users (bypassa RLS) |
-| `SUPABASE_JWT_SECRET` | Dashboard → Project Settings → API → JWT Settings → JWT Secret | Validação local do token |
-
-> ⚠️ `SUPABASE_SERVICE_ROLE_KEY` nunca deve ser exposta no frontend. Fica apenas no backend.
+> `SUPABASE_SERVICE_ROLE_KEY` nunca deve ser exposta no frontend.

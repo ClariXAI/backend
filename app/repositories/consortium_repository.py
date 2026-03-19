@@ -4,15 +4,15 @@ from datetime import date
 
 from app.repositories.base import BaseRepository
 
-_TABLE = "loans"
+_TABLE = "consortiums"
 
 
-class LoanRepository(BaseRepository):
+class ConsortiumRepository(BaseRepository):
 
     def create(
         self,
         user_uuid: str,
-        creditor: str,
+        administrator: str,
         total_amount: float,
         installments: int,
         monthly_payment: float,
@@ -21,7 +21,7 @@ class LoanRepository(BaseRepository):
     ) -> dict:
         row: dict = {
             "user_uuid": user_uuid,
-            "creditor": creditor,
+            "administrator": administrator,
             "total_amount": total_amount,
             "installments": installments,
             "monthly_payment": monthly_payment,
