@@ -19,11 +19,14 @@ def create_app() -> FastAPI:
     register_middlewares(app)
     register_exception_handlers(app)
 
-    from app.api.v1 import auth, categories, onboarding, profile
+    from app.api.v1 import auth, categories, goals, limits, onboarding, profile, transactions
     app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["auth"])
     app.include_router(onboarding.router, prefix=f"{settings.API_V1_PREFIX}/onboarding", tags=["onboarding"])
     app.include_router(profile.router, prefix=f"{settings.API_V1_PREFIX}/profile", tags=["profile"])
     app.include_router(categories.router, prefix=f"{settings.API_V1_PREFIX}/categories", tags=["categories"])
+    app.include_router(transactions.router, prefix=f"{settings.API_V1_PREFIX}/transactions", tags=["transactions"])
+    app.include_router(limits.router, prefix=f"{settings.API_V1_PREFIX}/limits", tags=["limits"])
+    app.include_router(goals.router, prefix=f"{settings.API_V1_PREFIX}/goals", tags=["goals"])
 
     @app.get("/health")
     async def health_check():

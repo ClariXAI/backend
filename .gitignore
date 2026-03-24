@@ -1,12 +1,22 @@
-.venv/
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.env
-.DS_Store
+.venv/
+venv/
 *.egg-info/
 dist/
-build/
 .pytest_cache/
-.ruff_cache/
-.claude/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
