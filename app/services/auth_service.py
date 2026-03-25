@@ -21,6 +21,8 @@ from app.schemas.auth import (
     RefreshResponse,
     RegisterRequest,
     RegisterResponse,
+    ResendConfirmationRequest,
+    ResendConfirmationResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
     TrialInfo,
@@ -395,3 +397,17 @@ def logout(access_token: str, supabase: Client) -> LogoutResponse:
             detail="Erro ao encerrar sessão",
         )
     return LogoutResponse()
+
+
+# ── Resend confirmation ─────────────────────────────────────────────────────────
+
+def resend_confirmation(data: ResendConfirmationRequest, supabase: Client) -> ResendConfirmationResponse:
+    """Reenvio do email de confirmação de cadastro via Supabase.
+    Sempre retorna sucesso — nunca revela se o email existe.
+    """
+    try:
+        supabase.auth.resend({"type": "signup", "email": data.email})
+    except Exception as exc:
+        logger.error("resend_confirmation_failed", email=data.email, error=str(exc))
+    logger.info("resend_confirmation_requested", email=data.email)
+    return ResendConfirmationResponse()

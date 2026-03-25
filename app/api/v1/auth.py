@@ -15,6 +15,8 @@ from app.schemas.auth import (
     RefreshResponse,
     RegisterRequest,
     RegisterResponse,
+    ResendConfirmationRequest,
+    ResendConfirmationResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
 )
@@ -69,3 +71,11 @@ def logout(
     supabase: Client = Depends(get_supabase_client),
 ) -> LogoutResponse:
     return auth_service.logout(credentials.credentials, supabase)
+
+
+@router.post("/resend-confirmation", response_model=ResendConfirmationResponse)
+def resend_confirmation(
+    data: ResendConfirmationRequest,
+    supabase: Client = Depends(get_supabase_client),
+) -> ResendConfirmationResponse:
+    return auth_service.resend_confirmation(data, supabase)

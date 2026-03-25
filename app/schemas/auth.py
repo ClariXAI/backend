@@ -121,3 +121,13 @@ class ResetPasswordRequest(BaseModel):
 
 class ResetPasswordResponse(BaseModel):
     detail: str = "Senha redefinida com sucesso."
+
+
+# ── Resend confirmation ────────────────────────────────────────────────────────
+
+class ResendConfirmationRequest(BaseModel):
+    email: EmailStr
+
+
+class ResendConfirmationResponse(BaseModel):
+    detail: str = "Se este email estiver cadastrado, você receberá um novo link de confirmação."
