@@ -123,6 +123,11 @@ def register(data: RegisterRequest, supabase: Client) -> RegisterResponse:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email já cadastrado",
             )
+        if "rate limit" in msg or "429" in msg:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Limite de cadastros atingido. Aguarde alguns minutos e tente novamente.",
+            )
         logger.error("supabase_signup_failed", email=data.email, error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
