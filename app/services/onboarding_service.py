@@ -8,15 +8,10 @@ from fastapi import HTTPException, status
 from supabase import Client
 
 from app.repositories.category_repository import CategoryRepository
-from app.repositories.consortium_repository import ConsortiumRepository
-from app.repositories.credit_card_repository import CreditCardRepository
 from app.repositories.goal_repository import GoalRepository
 from app.repositories.limit_repository import LimitRepository
-from app.repositories.loan_repository import LoanRepository
 from app.repositories.onboarding_repository import OnboardingRepository
-from app.repositories.subscription_repository import SubscriptionRepository
 from app.schemas.onboarding import (
-    CommitmentCreatedSummary,
     EmergencyFundGoalPreview,
     EmergencyFundRequest,
     EmergencyFundResponse,
@@ -355,19 +350,7 @@ def complete_onboarding(user_uuid: str, supabase: Client) -> OnboardingCompleteR
         except Exception as exc:
             logger.error("next_goal_create_failed", user_uuid=user_uuid, error=str(exc))
 
-    # 4. Criar compromisso
-    commitment_created: CommitmentCreatedSummary | None = None
-    commitment_raw = row.get("commitment")
-    if commitment_raw:
-        try:
-            if isinstance(commitment_raw, str):
-                import json
-                commitment_raw = json.loads(commitment_raw)
-            commitment_created = _create_commitment(user_uuid, commitment_raw, supabase)
-        except Exception as exc:
-            logger.error("commitment_create_failed", user_uuid=user_uuid, error=str(exc))
-
-    # 5. Marcar onboarding como concluído
+    # 4. Marcar onboarding como concluído
     onboarding_repo.mark_complete(user_uuid)
 
     logger.info("onboarding_completed", user_uuid=user_uuid)
@@ -377,77 +360,7 @@ def complete_onboarding(user_uuid: str, supabase: Client) -> OnboardingCompleteR
         categories_created=categories_created,
         limits_created=limits_created,
         goals_created=goals_created,
-        commitment_created=commitment_created,
     )
-
-
-def _create_commitment(
-    user_uuid: str,
-    commitment_raw: dict,
-    supabase: Client,
-) -> CommitmentCreatedSummary | None:
-    from datetime import date as date_type
-
-    commitment_type = commitment_raw.get("type")
-    data = commitment_raw.get("data", {})
-
-    if commitment_type == "assinatura":
-        repo = SubscriptionRepository(supabase)
-        due_date = data.get("due_date")
-        if isinstance(due_date, str):
-            due_date = date_type.fromisoformat(due_date)
-        repo.create(
-            user_uuid=user_uuid,
-            title=data["title"],
-            value=float(data["value"]),
-            plan=data["plan"],
-            due_date=due_date,
-        )
-        return CommitmentCreatedSummary(type="assinatura", title=data["title"])
-
-    elif commitment_type == "cartao":
-        repo = CreditCardRepository(supabase)
-        repo.create(
-            user_uuid=user_uuid,
-            name=data["name"],
-            bank=data["bank"],
-            total_limit=float(data["total_limit"]),
-            closing_day=int(data["closing_day"]),
-            due_day=int(data["due_day"]),
-        )
-        return CommitmentCreatedSummary(type="cartao", title=data["name"])
-
-    elif commitment_type == "emprestimo":
-        repo = LoanRepository(supabase)
-        start_date = data.get("start_date")
-        if isinstance(start_date, str):
-            start_date = date_type.fromisoformat(start_date)
-        repo.create(
-            user_uuid=user_uuid,
-            creditor=data["creditor"],
-            total_amount=float(data["total_amount"]),
-            installments=int(data["installments"]),
-            monthly_payment=float(data["monthly_payment"]),
-            start_date=start_date,
-        )
-        return CommitmentCreatedSummary(type="emprestimo", title=data["creditor"])
-
-    elif commitment_type == "consorcio":
-        repo = ConsortiumRepository(supabase)
-        start_date = data.get("start_date")
-        if isinstance(start_date, str):
-            start_date = date_type.fromisoformat(start_date)
-        repo.create(
-            user_uuid=user_uuid,
-            administrator=data["administrator"],
-            total_amount=float(data["total_amount"]),
-            installments=int(data["installments"]),
-            monthly_payment=float(data["monthly_payment"]),
-            start_date=start_date,
-        )
-        return CommitmentCreatedSummary(type="consorcio", title=data["administrator"])
-
-    return None
 
 
 # ── GET /onboarding/suggested-limits ─────────────────────────────────────────
