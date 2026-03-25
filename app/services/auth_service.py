@@ -403,11 +403,17 @@ def logout(access_token: str, supabase: Client) -> LogoutResponse:
 
 def resend_confirmation(data: ResendConfirmationRequest, supabase: Client) -> ResendConfirmationResponse:
     """Reenvio do email de confirmação de cadastro via Supabase.
-    Sempre retorna sucesso — nunca revela se o email existe.
+    Retorna 429 se o rate limit for atingido; demais erros são silenciosos.
     """
     try:
         supabase.auth.resend({"type": "signup", "email": data.email})
     except Exception as exc:
+        msg = str(exc).lower()
+        if "429" in msg or "rate limit" in msg:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Limite de reenvio atingido. Aguarde alguns minutos antes de tentar novamente.",
+            )
         logger.error("resend_confirmation_failed", email=data.email, error=str(exc))
     logger.info("resend_confirmation_requested", email=data.email)
     return ResendConfirmationResponse()
