@@ -101,20 +101,7 @@ def _months_to_reach(target: float, contribution: float) -> int:
 
 def _map_db_to_response(row: dict, include_ef_preview: bool = False) -> OnboardingResponse:
     """Converte linha do DB para OnboardingResponse."""
-    from app.schemas.onboarding import CommitmentInput  # local to avoid circular
     import json
-
-    commitment_raw = row.get("commitment")
-    commitment = None
-    if commitment_raw:
-        try:
-            if isinstance(commitment_raw, str):
-                commitment_raw = json.loads(commitment_raw)
-            from pydantic import TypeAdapter
-            ta = TypeAdapter(CommitmentInput)
-            commitment = ta.validate_python(commitment_raw)
-        except Exception:
-            pass
 
     next_goal_raw = row.get("next_goal")
     next_goal = None
@@ -134,7 +121,6 @@ def _map_db_to_response(row: dict, include_ef_preview: bool = False) -> Onboardi
         has_emergency_fund=row.get("has_emergency_fund"),
         emergency_fund_amount=row.get("emergency_fund_amount"),
         next_goal=next_goal,
-        commitment=commitment,
         current_step=row.get("current_step", 1),
         completed=bool(row.get("completed", False)),
     )
@@ -191,8 +177,6 @@ def save_onboarding(
         fields["emergency_fund_amount"] = data.emergency_fund_amount
     if data.next_goal is not None:
         fields["next_goal"] = data.next_goal.model_dump(mode="json")
-    if data.commitment is not None:
-        fields["commitment"] = data.commitment.model_dump(mode="json")
 
     # Calcula e persiste suggested_limits se tiver income + categorias
     income = data.income or existing.get("monthly_income")
