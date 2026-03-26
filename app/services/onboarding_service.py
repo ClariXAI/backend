@@ -249,16 +249,14 @@ def complete_onboarding(user_uuid: str, supabase: Client) -> OnboardingCompleteR
     created_cats = cat_repo.bulk_create(user_uuid, category_rows)
     categories_created = len(created_cats)
 
-    # 2. Criar limites (proporcional à renda, mês atual)
+    # 2. Criar limites (proporcional à renda)
     suggested_limits = row.get("suggested_limits") or _calculate_suggested_limits(income, selected_categories)
-    month_year = date.today().strftime("%Y-%m")
 
     cat_id_map: dict[str, int] = {c["name"]: c["id"] for c in created_cats if "id" in c and "name" in c}
     limit_rows = [
         {
             "category_id": cat_id_map[cat],
             "amount": suggested_limits.get(cat, round(income * 0.05, 2)),
-            "month_year": month_year,
         }
         for cat in selected_categories
         if cat in cat_id_map
